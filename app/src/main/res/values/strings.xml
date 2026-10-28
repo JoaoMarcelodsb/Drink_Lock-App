@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Drink_Lock</string>
+    <string name="accessibility_service_description">O DrinkLock utiliza este serviço para identificar quando um aplicativo protegido é aberto e exigir o teste de sobriedade.</string>
 </resources>
