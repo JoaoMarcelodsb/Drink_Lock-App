@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -171,37 +170,5 @@ fun IndicadorTentativas(
                     .background(if (preenchido) VerdeVibrante else BordaLinha),
             )
         }
-    }
-}
-
-@Composable
-fun BotaoGradiente(
-    texto: String,
-    aoClicar: () -> Unit,
-    modifier: Modifier = Modifier,
-    habilitado: Boolean = true,
-) {
-    val gradient = Brush.horizontalGradient(
-        colors = if (habilitado)
-            listOf(VerdeVibrante, VerdeClaro)
-        else
-            listOf(BordaLinha, BordaLinha),
-    )
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(gradient)
-            .clickable(enabled = habilitado, onClick = aoClicar)
-            .padding(horizontal = 32.dp),
-    ) {
-        Text(
-            text       = texto,
-            color      = if (habilitado) FundoPreto else TextoCinza,
-            fontSize   = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign  = TextAlign.Center,
-        )
     }
 }

@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.drink_lock.domain.model.EstadoBloqueio
 import com.example.drink_lock.domain.model.DesafioSobriedade
 import com.example.drink_lock.ui.components.*
@@ -32,7 +32,10 @@ fun LockScreen(
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(state) {
-        if (state is EstadoBloqueio.Desbloqueado) onUnlocked()
+        if (state is EstadoBloqueio.Desbloqueado) {
+            onUnlocked()
+            viewModel.init(appName)
+        }
     }
 
     DrinkLockTheme {
@@ -45,27 +48,26 @@ fun LockScreen(
                     )
                 ),
         ) {
-            val screenKey = state::class
-
             AnimatedContent(
-                targetState    = screenKey,
+                targetState    = state,
+                contentKey     = { it::class },
                 transitionSpec = {
                     fadeIn() + slideInVertically { it / 4 } togetherWith
                             fadeOut() + slideOutVertically { -it / 4 }
                 },
                 label          = "lock_content",
-            ) { _ ->
-                when (val current = state) {
+            ) { currentState ->
+                when (currentState) {
                     is EstadoBloqueio.Bloqueado        -> LockedPanel(
-                        state   = current,
+                        state   = currentState,
                         onStart = viewModel::startChallenge,
                     )
                     is EstadoBloqueio.Testando         -> TestingPanel(
-                        state = current,
+                        state = currentState,
                         onTap = viewModel::onTargetTapped,
                     )
-                    is EstadoBloqueio.Desbloqueado     -> UnlockedPanel(current)
-                    is EstadoBloqueio.Bloqueado_Espera -> CooldownPanel(current)
+                    is EstadoBloqueio.Desbloqueado     -> UnlockedPanel(currentState)
+                    is EstadoBloqueio.Bloqueado_Espera -> CooldownPanel(currentState)
                 }
             }
         }
@@ -118,9 +120,9 @@ private fun LockedPanel(
 
         Spacer(Modifier.height(48.dp))
 
-        BotaoGradiente(
-            texto     = "Iniciar teste",
-            aoClicar  = onStart,
+        PrimaryButton(
+            text     = "Iniciar teste",
+            onClick  = onStart,
             modifier  = Modifier.fillMaxWidth(),
         )
     }
