@@ -24,17 +24,18 @@ import com.example.drink_lock.ui.theme.*
 @Composable
 fun LockScreen(
     appName: String,
+    packageName: String? = null,
     onUnlocked: () -> Unit,
     viewModel: LockViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(appName) { viewModel.init(appName) }
+    LaunchedEffect(appName, packageName) { viewModel.init(appName, packageName) }
 
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(state) {
         if (state is EstadoBloqueio.Desbloqueado) {
             onUnlocked()
-            viewModel.init(appName)
+            viewModel.init(appName, packageName)
         }
     }
 

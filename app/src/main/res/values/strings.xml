@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">Drink_Lock</string>
-    <string name="accessibility_service_description">O DrinkLock utiliza este serviço para identificar quando um aplicativo protegido é aberto e exigir o teste de sobriedade.</string>
+    <string name="blocker_service_label">Drink Lock</string>
+    <string name="blocker_service_description">Percebe quando você abre um aplicativo protegido e pede o teste de sobriedade antes de liberar o acesso. O Drink Lock não lê o conteúdo da sua tela.</string>
 </resources>
+

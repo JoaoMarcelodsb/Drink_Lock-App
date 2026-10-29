@@ -2,9 +2,11 @@ package com.example.drink_lock.ui.lock
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.drink_lock.domain.model.ResultadoDesafio
-import com.example.drink_lock.domain.model.EstadoBloqueio
+import com.example.drink_lock.data.BlockerConfig
+import com.example.drink_lock.data.BlockerPreferences
 import com.example.drink_lock.domain.model.DesafioSobriedade
+import com.example.drink_lock.domain.model.EstadoBloqueio
+import com.example.drink_lock.domain.model.ResultadoDesafio
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,55 +16,69 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val MAX_ATTEMPTS        = 3
-private const val COUNTDOWN_MS        = 15_000L
-private const val COUNTDOWN_TICK_MS   = 100L
-private const val COOLDOWN_MINUTES    = 5
-private const val TAP_TARGET_COUNT    = 4
+private const val COUNTDOWN_TICK_MS = 250L
+private const val TAP_TARGET_COUNT = 4
 
 @HiltViewModel
-class LockViewModel @Inject constructor() : ViewModel() {
+class LockViewModel @Inject constructor(
+    private val prefs: BlockerPreferences,
+) : ViewModel() {
 
     private val _state = MutableStateFlow<EstadoBloqueio>(EstadoBloqueio.Bloqueado(nomeApp = ""))
     val state: StateFlow<EstadoBloqueio> = _state.asStateFlow()
 
-    private var attemptsLeft = MAX_ATTEMPTS
+    private var appName = ""
+    private var pacote: String? = null
+    private var attemptsLeft = BlockerConfig.MAX_ATTEMPTS
     private var timerJob: Job? = null
+    private var cooldownJob: Job? = null
 
-    fun init(appName: String) {
-        attemptsLeft = MAX_ATTEMPTS
-        _state.value = EstadoBloqueio.Bloqueado(appName)
+    private val persistir: Boolean get() = pacote != null
+
+    fun init(appName: String, packageName: String? = null) {
+        timerJob?.cancel()
+        cooldownJob?.cancel()
+        this.appName = appName
+        this.pacote = packageName
+
+        if (!persistir) {
+            attemptsLeft = BlockerConfig.MAX_ATTEMPTS
+            _state.value = EstadoBloqueio.Bloqueado(appName)
+            return
+        }
+
+        val restante = prefs.cooldownRemainingMs()
+        if (restante > 0L) {
+            showCooldown(restante)
+        } else {
+            prefs.clearCooldownIfExpired()
+            attemptsLeft = prefs.attemptsLeft()
+            _state.value = EstadoBloqueio.Bloqueado(appName)
+        }
     }
 
     fun startChallenge() {
-        val appName = currentAppName()
+        if (_state.value !is EstadoBloqueio.Bloqueado) return
         val challenge = buildTapSequenceChallenge()
-        _state.value = EstadoBloqueio.Testando(
-            nomeApp             = appName,
-            desafio             = challenge,
-            tentativasRestantes = attemptsLeft,
-        )
+        _state.value = EstadoBloqueio.Testando(appName, challenge, attemptsLeft)
         startCountdown(challenge)
     }
 
     fun onTargetTapped(targetIndex: Int) {
-        val current = (_state.value as? EstadoBloqueio.Testando) ?: return
+        val current = _state.value as? EstadoBloqueio.Testando ?: return
         val challenge = current.desafio as? DesafioSobriedade.SequenciaToque ?: return
 
-        val expectedNext = challenge.sequencia.getOrNull(challenge.progressoUsuario.size)
-        if (targetIndex != expectedNext) {
-            handleResult(ResultadoDesafio.REPROVADO, current.nomeApp)
+        val esperado = challenge.sequencia.getOrNull(challenge.progressoUsuario.size)
+        if (targetIndex != esperado) {
+            handleResult(ResultadoDesafio.REPROVADO)
             return
         }
 
-        val newProgress = challenge.progressoUsuario + targetIndex
-        val updatedChallenge = challenge.copy(progressoUsuario = newProgress)
-
-        if (newProgress == challenge.sequencia) {
-            timerJob?.cancel()
-            handleResult(ResultadoDesafio.APROVADO, current.nomeApp)
+        val novoProgresso = challenge.progressoUsuario + targetIndex
+        if (novoProgresso == challenge.sequencia) {
+            handleResult(ResultadoDesafio.APROVADO)
         } else {
-            _state.value = current.copy(desafio = updatedChallenge)
+            _state.value = current.copy(desafio = challenge.copy(progressoUsuario = novoProgresso))
         }
     }
 
@@ -75,24 +91,33 @@ class LockViewModel @Inject constructor() : ViewModel() {
                 remaining -= COUNTDOWN_TICK_MS
                 val current = _state.value as? EstadoBloqueio.Testando ?: return@launch
                 val ch = current.desafio as? DesafioSobriedade.SequenciaToque ?: return@launch
-                val updated = ch.copy(tempoRestanteMs = remaining.coerceAtLeast(0L))
-                _state.value = current.copy(desafio = updated)
+                _state.value = current.copy(desafio = ch.copy(tempoRestanteMs = remaining.coerceAtLeast(0L)))
             }
-            val current = _state.value as? EstadoBloqueio.Testando ?: return@launch
-            handleResult(ResultadoDesafio.TEMPO_ESGOTADO, current.nomeApp)
+            if (_state.value is EstadoBloqueio.Testando) handleResult(ResultadoDesafio.TEMPO_ESGOTADO)
         }
     }
 
-    private fun handleResult(result: ResultadoDesafio, appName: String) {
+    private fun handleResult(result: ResultadoDesafio) {
         timerJob?.cancel()
+
         when (result) {
             ResultadoDesafio.APROVADO -> {
+                pacote?.let {
+                    prefs.resetAttempts()
+                    prefs.unlockFor(it, BlockerConfig.UNLOCK_DURATION_MS)
+                }
                 _state.value = EstadoBloqueio.Desbloqueado(appName)
             }
+
             ResultadoDesafio.REPROVADO, ResultadoDesafio.TEMPO_ESGOTADO -> {
                 attemptsLeft--
+                if (persistir) prefs.setAttemptsLeft(attemptsLeft.coerceAtLeast(0))
+
                 if (attemptsLeft <= 0) {
-                    startCooldown(appName)
+                    if (persistir) {
+                        prefs.startCooldown(System.currentTimeMillis() + BlockerConfig.COOLDOWN_MS)
+                    }
+                    showCooldown(BlockerConfig.COOLDOWN_MS)
                 } else {
                     _state.value = EstadoBloqueio.Bloqueado(appName)
                 }
@@ -100,45 +125,29 @@ class LockViewModel @Inject constructor() : ViewModel() {
         }
     }
 
-    fun retryChallenge() {
-        val appName = currentAppName()
-        _state.value = EstadoBloqueio.Bloqueado(appName)
-    }
+    private fun showCooldown(totalMs: Long) {
+        cooldownJob?.cancel()
+        val fim = System.currentTimeMillis() + totalMs
+        val minutos = (BlockerConfig.COOLDOWN_MS / 60_000L).toInt()
 
-    private fun startCooldown(appName: String) {
-        var secondsLeft = COOLDOWN_MINUTES * 60
-        _state.value = EstadoBloqueio.Bloqueado_Espera(
-            nomeApp           = appName,
-            minutosBloqueio   = COOLDOWN_MINUTES,
-            segundosRestantes = secondsLeft,
-        )
-        viewModelScope.launch {
-            while (secondsLeft > 0) {
+        cooldownJob = viewModelScope.launch {
+            while (true) {
+                val restanteS = ((fim - System.currentTimeMillis() + 999L) / 1_000L).toInt()
+                if (restanteS <= 0) break
+                _state.value = EstadoBloqueio.Bloqueado_Espera(appName, minutos, restanteS)
                 delay(1_000L)
-                secondsLeft--
-                _state.value = EstadoBloqueio.Bloqueado_Espera(
-                    nomeApp           = appName,
-                    minutosBloqueio   = COOLDOWN_MINUTES,
-                    segundosRestantes = secondsLeft,
-                )
             }
-            attemptsLeft = MAX_ATTEMPTS
+            if (persistir) prefs.clearCooldownIfExpired()
+            attemptsLeft = BlockerConfig.MAX_ATTEMPTS
             _state.value = EstadoBloqueio.Bloqueado(appName)
         }
     }
 
-    private fun currentAppName(): String = when (val s = _state.value) {
-        is EstadoBloqueio.Bloqueado        -> s.nomeApp
-        is EstadoBloqueio.Testando         -> s.nomeApp
-        is EstadoBloqueio.Desbloqueado     -> s.nomeApp
-        is EstadoBloqueio.Bloqueado_Espera -> s.nomeApp
-    }
-
     private fun buildTapSequenceChallenge(): DesafioSobriedade.SequenciaToque {
-        val sequence = (0 until TAP_TARGET_COUNT).shuffled().take(TAP_TARGET_COUNT)
+        val sequence = (0 until TAP_TARGET_COUNT).shuffled()
         return DesafioSobriedade.SequenciaToque(
-            sequencia       = sequence,
-            tempoRestanteMs = COUNTDOWN_MS,
+            sequencia = sequence,
+            tempoRestanteMs = BlockerConfig.COUNTDOWN_MS,
         )
     }
 }
