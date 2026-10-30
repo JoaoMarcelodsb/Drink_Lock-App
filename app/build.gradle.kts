@@ -59,4 +59,7 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
 
     implementation(libs.lifecycle.viewmodel.ktx)
+
+    implementation(libs.retrofit)
+    implementation(libs.converter.gson)
 }
